@@ -1,0 +1,91 @@
+"""
+audit.py
+========
+Project: Cloud Storage Cost Optimizer
+
+
+Connects to AWS using Boto3 and scans all S3 buckets.
+Outputs a CSV with one row per S3 object including key metadata.
+
+Requirements: AWS credentials must be configured (aws configure)
+IAM needed: s3:ListAllMyBuckets, s3:ListObjectsV2, s3:GetBucketLocation
+"""
+
+import boto3
+import pandas as pd
+import os
+from datetime import datetime, timezone
+
+os.makedirs("outputs", exist_ok=True)
+
+def get_all_buckets(s3_client):
+    """Returns list of all bucket names accessible with current credentials."""
+    response = s3_client.list_buckets()
+    return [b["Name"] for b in response.get("Buckets", [])]
+
+
+def audit_bucket(s3_client, bucket_name):
+    """
+    Lists all objects in a bucket.
+    Returns a list of dicts with key metadata per object.
+    Uses pagination to handle buckets with 1000+ objects.
+    """
+    objects = []
+    paginator = s3_client.get_paginator("list_objects_v2")
+
+    try:
+        pages = paginator.paginate(Bucket=bucket_name)
+        for page in pages:
+            for obj in page.get("Contents", []):
+                last_modified = obj["LastModified"].replace(tzinfo=timezone.utc)
+                now = datetime.now(timezone.utc)
+                days_since_modified = (now - last_modified).days
+
+                key = obj["Key"]
+                ext = key.rsplit(".", 1)[-1].lower() if "." in key else "no_ext"
+
+                objects.append({
+                    "bucket":               bucket_name,
+                    "key":                  key,
+                    "size_bytes":           obj["Size"],
+                    "size_mb":              round(obj["Size"] / (1024 ** 2), 4),
+                    "last_modified":        last_modified.strftime("%Y-%m-%d"),
+                    "days_since_modified":  days_since_modified,
+                    "storage_class":        obj.get("StorageClass", "STANDARD"),
+                    "file_extension":       ext,
+                })
+    except s3_client.exceptions.NoSuchBucket:
+        print(f"  ⚠️  Bucket {bucket_name} not found — skipping")
+    except Exception as e:
+        print(f"  ⚠️  Error scanning {bucket_name}: {e}")
+
+    return objects
+
+
+def run_audit():
+    s3 = boto3.client("s3")
+    print("🔍 Connecting to AWS S3...\n")
+
+    buckets = get_all_buckets(s3)
+    print(f"Found {len(buckets)} bucket(s): {', '.join(buckets)}\n")
+
+    all_objects = []
+    for bucket in buckets:
+        print(f"  Scanning: {bucket}...", end=" ")
+        objs = audit_bucket(s3, bucket)
+        all_objects.extend(objs)
+        print(f"{len(objs)} objects")
+
+    df = pd.DataFrame(all_objects)
+    output_path = "outputs/audit_report.csv"
+    df.to_csv(output_path, index=False)
+
+    total_gb = df["size_bytes"].sum() / (1024 ** 3)
+    print(f"\n✅ Audit complete!")
+    print(f"   Objects scanned:  {len(df)}")
+    print(f"   Total storage:    {total_gb:.2f} GB")
+    print(f"   Output saved to:  {output_path}")
+
+
+if __name__ == "__main__":
+    run_audit()
