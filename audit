@@ -55,16 +55,16 @@ def audit_bucket(s3_client, bucket_name):
                     "file_extension":       ext,
                 })
     except s3_client.exceptions.NoSuchBucket:
-        print(f"  ⚠️  Bucket {bucket_name} not found — skipping")
+        print(f"    Bucket {bucket_name} not found — skipping")
     except Exception as e:
-        print(f"  ⚠️  Error scanning {bucket_name}: {e}")
+        print(f"    Error scanning {bucket_name}: {e}")
 
     return objects
 
 
 def run_audit():
     s3 = boto3.client("s3")
-    print("🔍 Connecting to AWS S3...\n")
+    print(" Connecting to AWS S3...\n")
 
     buckets = get_all_buckets(s3)
     print(f"Found {len(buckets)} bucket(s): {', '.join(buckets)}\n")
@@ -81,7 +81,7 @@ def run_audit():
     df.to_csv(output_path, index=False)
 
     total_gb = df["size_bytes"].sum() / (1024 ** 3)
-    print(f"\n✅ Audit complete!")
+    print(f"\n Audit complete!")
     print(f"   Objects scanned:  {len(df)}")
     print(f"   Total storage:    {total_gb:.2f} GB")
     print(f"   Output saved to:  {output_path}")
