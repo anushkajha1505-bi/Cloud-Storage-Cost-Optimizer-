@@ -2,7 +2,7 @@
 analyzer.py
 ===========
 Project: Cloud Storage Cost Optimizer
-Author: Anushka Jha
+
 
 Reads S3 audit CSV (from audit.py or sample data) and runs cost analysis.
 Outputs cost breakdown and savings recommendations to console + outputs/cost_summary.txt
@@ -85,13 +85,13 @@ def generate_report(df):
 
     # Bucket breakdown
     bucket_df = bucket_summary(df)
-    print("\n📦 STORAGE BY BUCKET")
+    print("\n STORAGE BY BUCKET")
     print(tabulate(bucket_df, headers="keys", tablefmt="simple", showindex=False,
                    floatfmt=".3f"))
 
     # File type breakdown
     ext_df = file_type_analysis(df)
-    print("\n📂 TOP FILE TYPES BY STORAGE")
+    print("\n TOP FILE TYPES BY STORAGE")
     print(tabulate(ext_df.head(10), headers="keys", tablefmt="simple",
                    showindex=False, floatfmt=".2f"))
 
@@ -99,15 +99,15 @@ def generate_report(df):
     cold, cold_gb, cold_saving = cold_object_analysis(df)
     archive, archive_gb, archive_saving = archive_analysis(df)
 
-    print("\n💡 RECOMMENDATIONS")
+    print("\n RECOMMENDATIONS")
     print("-" * 52)
-    print(f"✅ Move {cold_gb:.2f} GB (90+ day cold objects) to S3-IA")
+    print(f" Move {cold_gb:.2f} GB (90+ day cold objects) to S3-IA")
     print(f"   Est. saving: ${cold_saving:.2f}/month")
-    print(f"\n✅ Archive {archive_gb:.2f} GB (180+ days) to Glacier")
+    print(f"\n Archive {archive_gb:.2f} GB (180+ days) to Glacier")
     print(f"   Est. saving: ${archive_saving:.2f}/month")
     total_saving = cold_saving + archive_saving
     pct = (total_saving / total_cost * 100) if total_cost > 0 else 0
-    print(f"\n💰 Total potential saving: ${total_saving:.2f}/month ({pct:.1f}%)")
+    print(f"\n Total potential saving: ${total_saving:.2f}/month ({pct:.1f}%)")
     print("=" * 52)
 
     # Save to file
@@ -118,7 +118,7 @@ def generate_report(df):
         f.write(f"Cold Object Saving: ${cold_saving:.2f}/month\n")
         f.write(f"Archive Saving: ${archive_saving:.2f}/month\n")
         f.write(f"Total Saving: ${total_saving:.2f}/month ({pct:.1f}%)\n")
-    print("\n✅ Summary saved to outputs/cost_summary.txt")
+    print("\n Summary saved to outputs/cost_summary.txt")
 
 
 if __name__ == "__main__":
