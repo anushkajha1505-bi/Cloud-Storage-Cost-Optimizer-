@@ -1,0 +1,129 @@
+"""
+analyzer.py
+===========
+Project: Cloud Storage Cost Optimizer
+Author: Anushka Jha
+
+Reads S3 audit CSV (from audit.py or sample data) and runs cost analysis.
+Outputs cost breakdown and savings recommendations to console + outputs/cost_summary.txt
+
+Usage:
+  python src/analyzer.py --input outputs/audit_report.csv
+  python src/analyzer.py --input sample_data/mock_s3_audit.csv
+"""
+
+import pandas as pd
+import numpy as np
+import argparse
+import os
+from tabulate import tabulate
+
+# ─── AWS Pricing Constants (us-east-1, as of 2025) ───────────────────────────
+PRICE_STANDARD   = 0.023   # $ per GB per month
+PRICE_IA         = 0.0125  # $ per GB per month (S3 Infrequent Access)
+PRICE_GLACIER    = 0.004   # $ per GB per month (Glacier Instant Retrieval)
+
+COLD_THRESHOLD_DAYS    = 90   # days without access → IA candidate
+ARCHIVE_THRESHOLD_DAYS = 180  # days without access → Glacier candidate
+
+
+def load_data(path):
+    df = pd.read_csv(path)
+    print(f"✅ Loaded {len(df)} objects from: {path}")
+    return df
+
+
+def bucket_summary(df):
+    """Per-bucket storage and cost breakdown."""
+    summary = df.groupby("bucket").agg(
+        objects=("key", "count"),
+        total_gb=("size_bytes", lambda x: x.sum() / (1024**3)),
+    ).reset_index()
+    summary["estimated_cost_usd"] = (summary["total_gb"] * PRICE_STANDARD).round(4)
+    summary = summary.sort_values("total_gb", ascending=False)
+    return summary
+
+
+def cold_object_analysis(df):
+    """Objects not modified in 90+ days → candidates for IA tier."""
+    cold = df[df["days_since_modified"] >= COLD_THRESHOLD_DAYS].copy()
+    cold_gb = cold["size_bytes"].sum() / (1024**3)
+    saving = cold_gb * (PRICE_STANDARD - PRICE_IA)
+    return cold, cold_gb, saving
+
+
+def archive_analysis(df):
+    """Objects not modified in 180+ days → candidates for Glacier."""
+    archive = df[df["days_since_modified"] >= ARCHIVE_THRESHOLD_DAYS].copy()
+    archive_gb = archive["size_bytes"].sum() / (1024**3)
+    saving = archive_gb * (PRICE_STANDARD - PRICE_GLACIER)
+    return archive, archive_gb, saving
+
+
+def file_type_analysis(df):
+    """Which file extensions are consuming the most storage?"""
+    ext_summary = df.groupby("file_extension").agg(
+        count=("key", "count"),
+        total_mb=("size_bytes", lambda x: x.sum() / (1024**2)),
+    ).reset_index().sort_values("total_mb", ascending=False)
+    ext_summary["total_mb"] = ext_summary["total_mb"].round(2)
+    return ext_summary
+
+
+def generate_report(df):
+    total_bytes = df["size_bytes"].sum()
+    total_gb = total_bytes / (1024**3)
+    total_cost = total_gb * PRICE_STANDARD
+
+    print("\n" + "=" * 52)
+    print("   AWS S3 COST OPTIMIZATION REPORT")
+    print("=" * 52)
+    print(f"   Total Objects:    {len(df):,}")
+    print(f"   Total Storage:    {total_gb:.2f} GB")
+    print(f"   Estimated Cost:   ${total_cost:.2f}/month (Standard)")
+    print("=" * 52)
+
+    # Bucket breakdown
+    bucket_df = bucket_summary(df)
+    print("\n📦 STORAGE BY BUCKET")
+    print(tabulate(bucket_df, headers="keys", tablefmt="simple", showindex=False,
+                   floatfmt=".3f"))
+
+    # File type breakdown
+    ext_df = file_type_analysis(df)
+    print("\n📂 TOP FILE TYPES BY STORAGE")
+    print(tabulate(ext_df.head(10), headers="keys", tablefmt="simple",
+                   showindex=False, floatfmt=".2f"))
+
+    # Cold objects
+    cold, cold_gb, cold_saving = cold_object_analysis(df)
+    archive, archive_gb, archive_saving = archive_analysis(df)
+
+    print("\n💡 RECOMMENDATIONS")
+    print("-" * 52)
+    print(f"✅ Move {cold_gb:.2f} GB (90+ day cold objects) to S3-IA")
+    print(f"   Est. saving: ${cold_saving:.2f}/month")
+    print(f"\n✅ Archive {archive_gb:.2f} GB (180+ days) to Glacier")
+    print(f"   Est. saving: ${archive_saving:.2f}/month")
+    total_saving = cold_saving + archive_saving
+    pct = (total_saving / total_cost * 100) if total_cost > 0 else 0
+    print(f"\n💰 Total potential saving: ${total_saving:.2f}/month ({pct:.1f}%)")
+    print("=" * 52)
+
+    # Save to file
+    os.makedirs("outputs", exist_ok=True)
+    with open("outputs/cost_summary.txt", "w") as f:
+        f.write(f"Total Storage: {total_gb:.2f} GB\n")
+        f.write(f"Estimated Cost: ${total_cost:.2f}/month\n\n")
+        f.write(f"Cold Object Saving: ${cold_saving:.2f}/month\n")
+        f.write(f"Archive Saving: ${archive_saving:.2f}/month\n")
+        f.write(f"Total Saving: ${total_saving:.2f}/month ({pct:.1f}%)\n")
+    print("\n✅ Summary saved to outputs/cost_summary.txt")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="S3 Cost Analyzer")
+    parser.add_argument("--input", required=True, help="Path to audit CSV file")
+    args = parser.parse_args()
+    df = load_data(args.input)
+    generate_report(df)
